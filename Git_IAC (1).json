@@ -1,0 +1,181 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Sanitised EC2 deployment template with no hardcoded secrets and no user data",
+
+  "Metadata": {
+    "AWS::CloudFormation::Interface": {
+      "ParameterGroups": [
+        {
+          "Label": { "default": "Instance Configuration" },
+          "Parameters": ["AmiId", "InstanceType", "KeyPairName", "IamInstanceProfile"]
+        },
+        {
+          "Label": { "default": "Network Configuration" },
+          "Parameters": ["SubnetId", "SecurityGroupIds"]
+        },
+        {
+          "Label": { "default": "Naming & Tagging" },
+          "Parameters": ["ServerName", "Project"]
+        },
+        {
+          "Label": { "default": "Alerting" },
+          "Parameters": ["SnsAlarmTopicArn"]
+        }
+      ]
+    }
+  },
+
+  "Parameters": {
+    "AmiId": {
+      "Type": "AWS::EC2::Image::Id",
+      "Description": "AMI ID to use for the instance"
+    },
+    "SubnetId": {
+      "Type": "AWS::EC2::Subnet::Id",
+      "Description": "Subnet where the instance will be launched"
+    },
+    "SecurityGroupIds": {
+      "Type": "List<AWS::EC2::SecurityGroup::Id>",
+      "Description": "Security groups associated with the instance"
+    },
+    "KeyPairName": {
+      "Type": "AWS::EC2::KeyPair::KeyName",
+      "Description": "EC2 Key Pair name"
+    },
+    "IamInstanceProfile": {
+      "Type": "String",
+      "Description": "IAM Instance Profile name"
+    },
+    "SnsAlarmTopicArn": {
+      "Type": "String",
+      "Description": "SNS topic ARN for CloudWatch alarms"
+    },
+    "InstanceType": {
+      "Type": "String",
+      "Default": "t3a.medium",
+      "Description": "EC2 instance type",
+      "AllowedValues": [
+        "t3.small",
+        "t3.medium",
+        "t3.large",
+        "t3a.small",
+        "t3a.medium",
+        "t3a.large",
+        "m5.large",
+        "m5.xlarge",
+        "m5a.large",
+        "m5a.xlarge"
+      ]
+    },
+    "ServerName": {
+      "Type": "String",
+      "MaxLength": 8,
+      "AllowedPattern": "[a-zA-Z0-9\\-]+",
+      "ConstraintDescription": "Max 8 alphanumeric characters or hyphens",
+      "Description": "Hostname prefix (max 8 characters, alphanumeric and hyphens only)"
+    },
+    "Project": {
+      "Type": "String",
+      "Description": "Customer or internal project identifier"
+    }
+  },
+
+  "Resources": {
+    "EC2Instance": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "InstanceType": { "Ref": "InstanceType" },
+        "ImageId": { "Ref": "AmiId" },
+        "SubnetId": { "Ref": "SubnetId" },
+        "SecurityGroupIds": { "Ref": "SecurityGroupIds" },
+        "KeyName": { "Ref": "KeyPairName" },
+        "IamInstanceProfile": { "Ref": "IamInstanceProfile" },
+
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": { "Fn::Sub": "${ServerName}-AECS" }
+          },
+          {
+            "Key": "Project",
+            "Value": { "Ref": "Project" }
+          },
+          {
+            "Key": "Backup",
+            "Value": "Customer"
+          },
+          {
+            "Key": "Environment",
+            "Value": "Production"
+          }
+        ],
+
+        "DisableApiTermination": true,
+
+        "BlockDeviceMappings": [
+          {
+            "DeviceName": "/dev/sda1",
+            "Ebs": {
+              "VolumeSize": 100,
+              "VolumeType": "gp3",
+              "Encrypted": true,
+              "DeleteOnTermination": false
+            }
+          },
+          {
+            "DeviceName": "/dev/xvdf",
+            "Ebs": {
+              "VolumeSize": 40,
+              "VolumeType": "gp3",
+              "Encrypted": true,
+              "DeleteOnTermination": false
+            }
+          }
+        ]
+      }
+    },
+
+    "StatusCheckFailed": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "AlarmDescription": "Recover instance when system status check fails",
+        "Namespace": "AWS/EC2",
+        "MetricName": "StatusCheckFailed_System",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Threshold": 0,
+        "EvaluationPeriods": 2,
+        "Period": 60,
+        "Statistic": "Average",
+        "TreatMissingData": "ignore",
+        "AlarmActions": [
+          { "Ref": "SnsAlarmTopicArn" }
+        ],
+        "Dimensions": [
+          {
+            "Name": "InstanceId",
+            "Value": { "Ref": "EC2Instance" }
+          }
+        ]
+      }
+    },
+
+    "ElasticIP": {
+      "Type": "AWS::EC2::EIP",
+      "Properties": {
+        "Domain": "vpc",
+        "InstanceId": { "Ref": "EC2Instance" }
+      }
+    }
+  },
+
+  "Outputs": {
+    "InstanceId": {
+      "Description": "EC2 Instance ID",
+      "Value": { "Ref": "EC2Instance" }
+    },
+    "PublicIP": {
+      "Description": "Elastic IP address assigned to the instance",
+      "Value": { "Ref": "ElasticIP" }
+    }
+  }
+}

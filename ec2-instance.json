@@ -1,6 +1,6 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "Sanitised EC2 deployment template with no hardcoded secrets and no user data",
+  "Description": "Sanitised EC2 deployment template",
 
   "Metadata": {
     "AWS::CloudFormation::Interface": {
